@@ -204,6 +204,8 @@ struct tls_sock {
 	} dtls_window;
 
 	int unsent;
+
+	struct tls_record_info *record;
 };
 
 struct tls_rx_msg {
