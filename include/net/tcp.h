@@ -891,6 +891,10 @@ struct rate_sample {
 	bool is_retrans;	/* is sample from retransmission? */
 };
 
+struct tcp_offload_ops {
+	void (*clean_offloaded_data)(struct sock *sk);
+};
+
 struct tcp_congestion_ops {
 	struct list_head	list;
 	u32 key;
@@ -1510,6 +1514,7 @@ static inline void tcp_write_queue_purge(struct sock *sk)
 
 	while ((skb = __skb_dequeue(&sk->sk_write_queue)) != NULL)
 		sk_wmem_free_skb(sk, skb);
+
 	sk_mem_reclaim(sk);
 	tcp_clear_all_retrans_hints(tcp_sk(sk));
 }
