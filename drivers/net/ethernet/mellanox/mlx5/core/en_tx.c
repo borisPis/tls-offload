@@ -35,7 +35,7 @@
 #include "en.h"
 
 #define MLX5E_SQ_NOPS_ROOM  MLX5_SEND_WQE_MAX_WQEBBS
-#define MLX5E_SQ_STOP_ROOM (MLX5_SEND_WQE_MAX_WQEBBS +\
+#define MLX5E_SQ_STOP_ROOM (2 * MLX5_SEND_WQE_MAX_WQEBBS +\
 			    MLX5E_SQ_NOPS_ROOM)
 
 void mlx5e_send_nop(struct mlx5e_sq *sq, bool notify_hw)
@@ -403,6 +403,7 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct mlx5e_sq *sq = NULL;
 	struct mlx5e_accel_client_ops *accel_client_ops;
 	struct mlx5e_swp_info swp_info = {0};
+	int ret;
 
 	rcu_read_lock();
 	accel_client_ops = rcu_dereference(priv->accel_client_ops);
@@ -416,7 +417,11 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	sq = priv->txq_to_sq_map[skb_get_queue_mapping(skb)];
 
-	return mlx5e_sq_xmit(sq, skb, &swp_info);
+	do {
+		ret = mlx5e_sq_xmit(sq, skb, &swp_info);
+		skb = skb->next;
+	} while (skb);
+	return ret;
 }
 
 bool mlx5e_poll_tx_cq(struct mlx5e_cq *cq, int napi_budget)
