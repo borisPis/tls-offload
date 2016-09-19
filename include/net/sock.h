@@ -389,7 +389,8 @@ struct sock {
 	 * changes are protected by socket lock.
 	 */
 	kmemcheck_bitfield_begin(flags);
-	unsigned int		sk_padding : 2,
+	unsigned int		sk_padding : 1,
+				sk_offloaded   : 1,
 				sk_no_check_tx : 1,
 				sk_no_check_rx : 1,
 				sk_userlocks : 4,
