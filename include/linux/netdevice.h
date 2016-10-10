@@ -844,6 +844,13 @@ struct xfrmdev_ops {
 };
 #endif
 
+struct ktls_keys;
+
+struct ktls_ops {
+	int			(*ktls_dev_add)(struct net_device *netdev, struct sock *sk, struct ktls_keys *key);
+	void			(*ktls_dev_del)(struct net_device *netdev, struct sock *sk);
+};
+
 /*
  * This structure defines the management hooks for network devices.
  * The following hooks can be defined; unless noted otherwise, they are
@@ -1723,6 +1730,8 @@ struct net_device {
 #ifdef CONFIG_XFRM
 	const struct xfrmdev_ops *xfrmdev_ops;
 #endif
+
+	const struct ktls_ops		*ktls_ops;
 
 	const struct header_ops *header_ops;
 
