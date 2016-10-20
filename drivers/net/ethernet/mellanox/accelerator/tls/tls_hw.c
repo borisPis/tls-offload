@@ -212,8 +212,6 @@ void mlx_tls_hw_qp_recv_cb(void *cb_arg,
 	default:
 		pr_warn("mlx_tls_hw_qp_recv_cb: unexpected event opcode %u\n", ntohl(ev->opcode));
 	}
-
-	kfree(buf);
 }
 
 #endif /* MLX_TLS_SADB_RDMA */
