@@ -291,6 +291,7 @@ struct sock_common {
   *	@sk_peek_off: current peek_offset value
   *	@sk_send_head: front of stuff to transmit
   *	@sk_security: used by security modules
+  *	@sk_tls_offload: tls offload context 
   *	@sk_mark: generic packet mark
   *	@sk_cgrp_data: cgroup data for this cgroup
   *	@sk_memcg: this socket's memory cgroup association
@@ -435,6 +436,7 @@ struct sock {
 #ifdef CONFIG_SECURITY
 	void			*sk_security;
 #endif
+	void			*sk_tls_offload;
 	struct sock_cgroup_data	sk_cgrp_data;
 	struct mem_cgroup	*sk_memcg;
 	void			(*sk_state_change)(struct sock *sk);
