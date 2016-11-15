@@ -844,6 +844,34 @@ struct xfrmdev_ops {
 };
 #endif
 
+struct ktls_keys;
+struct ktls_offload_context;
+
+/*
+ * This structure defines the management hooks for TLS offload.
+ *
+ * int (*ktls_dev_add)(struct net_device *netdev,
+ *    		       struct sock *sk,
+ *		       struct ktls_keys *key,
+ *		       struct ktls_offload_context **context);
+ * Called when a user requests to offload the crypto of a TLS socket to a
+ * netdevice. If successful the netdevice allocates @context, and packets sent
+ * to this device must be encrypted by this device.
+ *
+ * void	(*ktls_dev_del)(struct net_device *netdev,
+ *			struct sock *sk);
+ * Called to remove crypto offload from a TLS socket when a socket is
+ * destroyed.
+ */
+struct ktls_ops {
+	int			(*ktls_dev_add)(struct net_device *netdev,
+						struct sock *sk,
+						struct ktls_keys *key,
+						struct ktls_offload_context **context);
+	void			(*ktls_dev_del)(struct net_device *netdev,
+						struct sock *sk);
+};
+
 /*
  * This structure defines the management hooks for network devices.
  * The following hooks can be defined; unless noted otherwise, they are
@@ -1502,6 +1530,7 @@ enum netdev_priv_flags {
  *	@ethtool_ops:	Management operations
  *	@ndisc_ops:	Includes callbacks for different IPv6 neighbour
  *			discovery handling. Necessary for e.g. 6LoWPAN.
+ *	@ktls_ops:	Includes callbacks for offloading TLS crypto.
  *	@header_ops:	Includes callbacks for creating,parsing,caching,etc
  *			of Layer 2 headers.
  *
@@ -1723,6 +1752,8 @@ struct net_device {
 #ifdef CONFIG_XFRM
 	const struct xfrmdev_ops *xfrmdev_ops;
 #endif
+
+	const struct ktls_ops		*ktls_ops;
 
 	const struct header_ops *header_ops;
 
