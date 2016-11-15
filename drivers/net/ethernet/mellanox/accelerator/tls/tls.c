@@ -111,7 +111,8 @@ struct mlx_tls_offload_context *get_tls_context(struct sock *sk)
 }
 
 static int mlx_ktls_add(struct net_device *netdev, struct sock *sk,
-		struct ktls_keys *keys) {
+			struct ktls_keys *keys,
+			struct ktls_offload_context **ktls_context) {
 	struct mlx_tls_offload_context *context;
 	struct mlx_tls_dev *dev;
 	int swid;
@@ -151,6 +152,7 @@ static int mlx_ktls_add(struct net_device *netdev, struct sock *sk,
 	mlx_ktls_hw_start_cmd(dev, sk, context, keys);
 	try_module_get(THIS_MODULE);
 	ret = 0;
+	*ktls_context = context;
 out:
 	return ret;
 }
