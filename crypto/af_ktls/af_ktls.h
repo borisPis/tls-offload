@@ -32,6 +32,7 @@
 #define KTLS_SET_SALT_SEND		6
 #define KTLS_SET_MTU			7
 #define KTLS_UNATTACH			8
+#define KTLS_SET_OFFLOAD		9
 
 /* setsockopt() optnames */
 #define KTLS_GET_IV_RECV		11
@@ -225,7 +226,7 @@ static inline struct tls_sock *tls_sk(struct sock *sk)
 	return (struct tls_sock *)sk;
 }
 
-static void tls_err_abort(struct tls_sock *tsk)
+static inline void tls_err_abort(struct tls_sock *tsk)
 {
 	struct sock *sk;
 
@@ -236,7 +237,7 @@ static void tls_err_abort(struct tls_sock *tsk)
 	tsk->saved_sk_data_ready(tsk->socket->sk);
 }
 
-static void tls_increment_seqno(unsigned char *seq, struct tls_sock *tsk)
+static inline void tls_increment_seqno(unsigned char *seq, struct tls_sock *tsk)
 {
 	int i;
 
@@ -252,9 +253,9 @@ static void tls_increment_seqno(unsigned char *seq, struct tls_sock *tsk)
 		tls_err_abort(tsk);
 }
 
-static void tls_make_prepend(struct tls_sock *tsk,
-			     char *buf,
-			     size_t plaintext_len)
+static inline void tls_make_prepend(struct tls_sock *tsk,
+				    char *buf,
+				    size_t plaintext_len)
 {
 	size_t pkt_len;
 
@@ -281,4 +282,9 @@ static void tls_make_prepend(struct tls_sock *tsk,
 	}
 }
 
+int tls_set_offload(struct socket *sock, char __user *src, size_t src_len);
+int tls_sendmsg_with_offload(struct tls_sock *tsk, struct msghdr *msg,
+			     size_t size);
+ssize_t tls_sendpage_with_offload(struct socket *sock, struct page *page,
+				  int offset, size_t size, int flags);
 #endif

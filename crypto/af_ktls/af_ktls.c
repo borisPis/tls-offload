@@ -630,6 +630,9 @@ static int tls_setsockopt(struct socket *sock,
 		tls_do_unattach(sock);
 		ret = 0;
 		break;
+	case KTLS_SET_OFFLOAD:
+		ret = tls_set_offload(sock, optval, optlen);
+		break;
 	default:
 		break;
 	}
@@ -919,33 +922,15 @@ out:
 		tsk->sk.sk_err = ret;
 }
 
-static int tls_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
+static int tls_sendmsg_no_offload(struct tls_sock *tsk, struct msghdr *msg,
+		size_t size)
 {
-	struct sock *sk = sock->sk;
-	struct tls_sock *tsk = tls_sk(sk);
+	struct sock *sk = &tsk->sk;
 	int ret = 0;
 	long timeo = sock_sndtimeo(sk, msg->msg_flags & MSG_DONTWAIT);
 	bool eor = !(msg->msg_flags & MSG_MORE) || IS_DTLS(tsk);
 	struct sk_buff *skb = NULL;
 	size_t copy, copied = 0;
-
-	lock_sock(sock->sk);
-
-	if (msg->msg_flags & MSG_OOB) {
-		ret = -ENOTSUPP;
-		goto send_end;
-	}
-	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
-
-	if (!KTLS_SEND_READY(tsk)) {
-		ret = -EBADMSG;
-		goto send_end;
-	}
-
-	if (size > KTLS_MAX_PAYLOAD_SIZE && IS_DTLS(tsk)) {
-		ret = -E2BIG;
-		goto send_end;
-	}
 
 	while (msg_data_left(msg)) {
 		bool merge = true;
@@ -1046,6 +1031,39 @@ send_end:
 	if (unlikely(skb_queue_len(&sk->sk_write_queue) == 0 && ret == -EAGAIN))
 		sk->sk_write_space(sk);
 
+	return ret;
+}
+
+static int tls_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
+{
+	struct sock *sk = sock->sk;
+	struct tls_sock *tsk = tls_sk(sk);
+	int ret = 0;
+
+	lock_sock(sock->sk);
+
+	if (msg->msg_flags & MSG_OOB) {
+		ret = -ENOTSUPP;
+		goto send_end;
+	}
+	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
+
+	if (!KTLS_SEND_READY(tsk)) {
+		ret = -EBADMSG;
+		goto send_end;
+	}
+
+	if (size > KTLS_MAX_PAYLOAD_SIZE && IS_DTLS(tsk)) {
+		ret = -E2BIG;
+		goto send_end;
+	}
+
+	if (tsk->socket->sk->sk_tls_offload)
+		ret = tls_sendmsg_with_offload(tsk, msg, size);
+	else
+		ret = tls_sendmsg_no_offload(tsk, msg, size);
+
+send_end:
 	release_sock(sk);
 
 	return ret < 0 ? ret : size;
@@ -1457,36 +1475,19 @@ splice_read_end:
 	return ret;
 }
 
-static ssize_t tls_sendpage(struct socket *sock, struct page *page,
-			    int offset, size_t size, int flags)
+static ssize_t tls_sendpage_no_offload(struct socket *sock, struct page *page,
+				       int offset, size_t size, int flags)
 {
 	int ret = 0, i;
 	struct sock *sk = sock->sk;
 	long timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
-	struct tls_sock *tsk;
+	struct tls_sock *tsk = tls_sk(sk);
 	bool eor;
 	struct sk_buff *skb = NULL;
 	size_t queued = 0;
 
-	if (flags & MSG_SENDPAGE_NOTLAST)
-		flags |= MSG_MORE;
-
 	/* No MSG_EOR from splice, only look at MSG_MORE */
 	eor = !(flags & MSG_MORE);
-
-	tsk = tls_sk(sk);
-	lock_sock(sk);
-
-	if (!KTLS_SEND_READY(tsk)) {
-		ret = -EBADMSG;
-		goto sendpage_end;
-	}
-
-	if (flags & MSG_OOB) {
-		ret = -ENOTSUPP;
-		goto sendpage_end;
-	}
-	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 
 	/* Call the sk_stream functions to manage the sndbuf mem. */
 	while (size > 0) {
@@ -1498,11 +1499,11 @@ static ssize_t tls_sendpage(struct socket *sock, struct page *page,
 			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 			ret = sk_stream_wait_memory(sk, &timeo);
 			if (ret)
-				goto sendpage_end;
+				break;
 		}
 
 		if (sk->sk_err)
-			goto sendpage_end;
+			break;
 
 		skb = tcp_write_queue_tail(sk);
 		if (skb) {
@@ -1523,12 +1524,12 @@ static ssize_t tls_sendpage(struct socket *sock, struct page *page,
 				while (!tskb) {
 					tls_push(tsk);
 					if (sk->sk_err)
-						goto sendpage_end;
+						break;
 					set_bit(SOCK_NOSPACE,
 						&sk->sk_socket->flags);
 					ret = sk_stream_wait_memory(sk, &timeo);
 					if (ret)
-						goto sendpage_end;
+						break;
 
 					tskb = alloc_skb(0, sk->sk_allocation);
 				}
@@ -1565,7 +1566,7 @@ coalesced:
 		if (eor || tsk->unsent >= KTLS_MAX_PAYLOAD_SIZE)
 			tls_push(tsk);
 	}
-sendpage_end:
+
 	if (eor || tsk->unsent >= KTLS_MAX_PAYLOAD_SIZE)
 		tls_push(tsk);
 
@@ -1578,9 +1579,46 @@ sendpage_end:
 	if (unlikely(skb_queue_len(&sk->sk_write_queue) == 0 && ret == -EAGAIN))
 		sk->sk_write_space(sk);
 
+	return ret < 0 ? ret : queued;
+}
+
+static ssize_t tls_sendpage(struct socket *sock, struct page *page,
+			    int offset, size_t size, int flags)
+{
+	int ret = 0;
+	struct sock *sk = sock->sk;
+	struct tls_sock *tsk;
+
+	if (flags & MSG_SENDPAGE_NOTLAST)
+		flags |= MSG_MORE;
+
+	tsk = tls_sk(sk);
+	lock_sock(sk);
+
+	/* TODO: handle flags, see issue #4 */
+	if (!KTLS_SEND_READY(tsk)) {
+		ret = -EBADMSG;
+		goto sendpage_end;
+	}
+
+	if (flags & MSG_OOB) {
+		ret = -ENOTSUPP;
+		goto sendpage_end;
+	}
+	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
+
+
+	if (tsk->socket->sk->sk_tls_offload)
+		ret = tls_sendpage_with_offload(sock, page, offset,
+						size, flags);
+	else
+		ret = tls_sendpage_no_offload(sock, page, offset, size, flags);
+
+sendpage_end:
+
 	release_sock(sk);
 
-	return ret < 0 ? ret : queued;
+	return ret;
 }
 
 static int tls_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
