@@ -4,7 +4,8 @@
 
 config MLX_ACCEL_TLS
 	tristate "Mellanox Technologies TLS accelarator driver"
-	depends on MLX_ACCEL_CORE && NET_TLS_OFFLOAD
+	#depends on MLX_ACCEL_CORE && NET_TLS_OFFLOAD
+	depends on MLX_ACCEL_CORE
 	default n
 	---help---
 	  TLS accelarator driver by Mellanox Technologies.
